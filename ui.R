@@ -29,10 +29,7 @@ library("dplyr")
 # Specify the current raw data to be used 
 
 # setup database
-
-
 # DBI::dbDisconnect(exercise_database)
-######## LIZ to check -----------------------------------------------------------------------------
 ##Load filepaths from config file
 configfile <- file.path(path.expand('~'),'.Rconfig.csv')
 try(config <-read.csv(configfile, sep=',', quote='\"', header=T))
@@ -58,7 +55,6 @@ varnames <-  read.csv(as.character(config$VARSFILE),
 
 DBI::dbListTables(exercise_database)
 
-######## END -----------------------------------------------------------------------------
 
 # subject names for inputs
 subjects <- tbl(exercise_database, 
@@ -72,6 +68,9 @@ subjects <- tbl(exercise_database,
   collect() %>% 
   filter(!is.na(Subject))
 
+
+# STUFF ----------------------------------------------------------------------
+Logged = FALSE
 
 # USER INTERFACE -------------------------------------------------------------------------------------------------
   # header ---------------
@@ -94,8 +93,11 @@ subjects <- tbl(exercise_database,
 
   # body ------------------        
   body <-  dashboardBody(
+    
+    verbatimTextOutput("dataInfo"),
+    
     tabItems(
-      
+ 
     # UNIVARIATE ------------------------------------------------------------------    
     tabItem(tabName = "uni",   
             
