@@ -3,15 +3,14 @@
   # PROGRAMMER:   Alan Ho, MMStat
 #=================================================================================================================#
 
-# STUFF ------------------------------------------------------------------------
-my_username <- "user"
-my_password <- "HDFLM5905L"
-
-
 # FUNCTIONS --------------------------
 ##Load filepaths from config file
 configfile <- file.path(path.expand('~'),'.Rconfig.csv')
 try(config <-read.csv(configfile, sep=',', quote='\"', header=T))
+
+# STUFF ------------------------------------------------------------------------
+my_username <- as.character(config$USER)
+my_password <- as.character(config$PASSWORD)
 
 setwd(as.character(config$DATADIR)) # sets the working directory
 exercise_database <- DBI::dbConnect(RSQLite::SQLite(),as.character(config$DB)) # connects to database
