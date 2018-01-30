@@ -2,269 +2,77 @@
   # PROJECT:      Exercise and Cognition project
   # PROGRAMMER:   Alan Ho, MMStat
 #=================================================================================================================#
-
-# FUNCTIONS --------------------------
-##Load filepaths from config file
 configfile <- file.path(path.expand('~'),'.Rconfig.csv')
 try(config <-read.csv(configfile, sep=',', quote='\"', header=T))
-
-# STUFF ------------------------------------------------------------------------
-my_username <- as.character(config$USER)
-my_password <- as.character(config$PASSWORD)
-
-setwd(as.character(config$DATADIR)) # sets the working directory
-exercise_database <- DBI::dbConnect(RSQLite::SQLite(),as.character(config$DB)) # connects to database
-varnames <-  read.csv(as.character(config$VARSFILE),
-                      header = T, 
-                      stringsAsFactors = F)
-
-scatter_LS <- function(data, xlab, ylab, out, mult = F) {
-  
-  if(length(xlab) == 1) { x = as.data.frame(data)[ , xlab] } else { x = rowSums(as.data.frame(data)[ , xlab]) }
-  if(length(ylab) == 1) { y = as.data.frame(data)[ , ylab] } else { y = rowSums(as.data.frame(data)[ , ylab]) }
-  model <- lm(y~x)
-  
-  lm_eqn <- function(m){
-    pval <- 1 - pf(summary(m)$fstatistic[1], summary(m)$fstatistic[2], summary(m)$fstatistic[3]);
-    eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(r[adj])^2~"="~r2 ~","~italic(p)~"="~pval, 
-                     list(a = format(coef(m)[1], digits = 2), 
-                          b = format(coef(m)[2], digits = 2), 
-                          r2 = format(summary(m)$adj.r.squared, digits = 3),
-                          pval = format(pval, digits = 3)
-                     ))
-    as.character(as.expression(eq));                 
-  }
-  
-  
-  g <- 
-    if(mult == F) {
-      ggplot(as.data.frame(data), aes(x = x, y = y)) +
-        geom_point() +
-        geom_smooth(method = "lm", se = TRUE) +  
-        geom_label(aes(x = -Inf, y = Inf), 
-                   hjust = 0, 
-                   vjust = 1, 
-                   label = lm_eqn(model),
-                   parse = TRUE, 
-                   size = 5) + 
-        labs(x = paste(xlab ,collapse = " + "), 
-             y = paste(ylab ,collapse = " + ")) + 
-        theme_classic() 
-      
-    } else {
-      
-      ggplot(as.data.frame(data), aes(x = x, y = y)) +
-        geom_point() +
-        geom_smooth(method = "lm", se = TRUE) +  
-        # geom_label(aes(x = -Inf, y = Inf), 
-        #            hjust = 0, 
-        #            vjust = 1, 
-        #            label = lm_eqn(model),
-        #            parse = TRUE, 
-        #            size = 5) + 
-        labs(x = paste(xlab ,collapse = " + "), 
-             y = paste(ylab ,collapse = " + ")) + 
-        theme_classic() 
-      
-      
-    }
-  
-  
-  if(out == "model") {
-    
-    return(model)
-    
-  } else if (out == "eqn") {
-    
-    return(lm_eqn(model))
-    
-  } else if (out == "plot"){
-    
-    return(g)
-  }
-  
-}
-
 
 # selects the colours
 grpcol <- c("red", "blue", "green", "purple")
 grpcol <- setNames(grpcol, c("AIT", "MIT", "LIT", "withdrawn"))
 
 
-
 # SERVER ----------------------------------------------------------------------------------------------------------
 server <- (function(input, output, session) {
-  # STUFF-------------------------------------------------------------------------
-  values <- reactiveValues(authenticated = FALSE)
-  
-  # Return the UI for a modal dialog with data selection input. If 'failed' 
-  # is TRUE, then display a message that the previous value was invalid.
-  dataModal <- function(failed = FALSE) {
-    modalDialog(
-      textInput("username", "Username:"),
-      passwordInput("password", "Password:"),
-      footer = tagList(
-        # modalButton("Cancel"),
-        actionButton("ok", "OK")
-      )
-    )
-  }
-  
-  # Show modal when button is clicked.  
-  # This `observe` is suspended only whith right user credential
-  
-  obs1 <- observe({
-    showModal(dataModal())
-  })
-  
-  # When OK button is pressed, attempt to authenticate. If successful,
-  # remove the modal. 
-  
-  obs2 <- observe({
-    req(input$ok)
-    isolate({
-      Username <- input$username
-      Password <- input$password
-    })
-    Id.username <- which(my_username == Username)
-    Id.password <- which(my_password == Password)
-    if (length(Id.username) > 0 & length(Id.password) > 0) {
-      if (Id.username == Id.password) {
-        Logged <<- TRUE
-        values$authenticated <- TRUE
-        obs1$suspend()
-        removeModal()
-        
-      } else {
-        values$authenticated <- FALSE
-      }     
-    }
-  })
-  
-  
-  output$dataInfo <- renderPrint({
-    if (values$authenticated) "Welcome USER"
-    else "You are NOT authenticated"
-  })
-  
-  
   # UNIVARIATE ----------------------------------------------------------------------------------------------------
-  observeEvent(input$data1,  {
+
+  uni_data <- reactive({
     
+    join_df(v1 = input$xvar, 
+            v2 = input$yvar, 
+            delta = input$selInterval,
+            out = "data")
     
-    updateSelectizeInput(session = session, inputId = "xvar", 
-                         choices = 
-                           
-                           
-                           (varnames %>% filter(dataset == input$data1))$variable
-                         
-        
-                         
-    )
-    
-    
-  }) # this updates the variable names for data set 1
-  observeEvent(input$data2,  {
-    
-    
-    updateSelectizeInput(session = session, inputId = "yvar", 
-                         choices = 
-                           
-                           (varnames %>% filter(dataset == input$data2))$variable
-                         
-                         
-    )
-  
-    
-  }) # this updates the variable names for data set 2
-  uni_data <- eventReactive(input$go, {
-    
-    if(input$data1 == input$data2) {
-      
-      tbl(exercise_database, sql(paste("SELECT * FROM ", input$data1, sep = ""))) %>% 
-        collect() %>% 
-        dplyr::select(xnat_subjectdata_subject_label, 
-                      xnat_subjectdata_sub_group,
-                      interval, 
-                      input$xvar, 
-                      input$yvar) %>% 
-        filter(interval == input$selInterval)
-      
-    } else {
-      
-      as.data.frame(
-        
-        (function(data1, data2){
-          
-          lapply(list(data1, data2), function(df)
-            tbl(exercise_database, sql(paste("SELECT * FROM ", df, sep = ""))) %>% 
-              # filter(interval == 0) %>% 
-              collect()
-            
-          ) %>% 
-            reduce(full_join, by = c("xnat_subjectdata_subject_label",
-                                     "xnat_subjectdata_sub_group",
-                                     "interval"))
-          
-        })(input$data1,input$data2) %>% 
-          dplyr::select(xnat_subjectdata_subject_label, 
-                        xnat_subjectdata_sub_group,
-                        interval, 
-                        input$xvar, 
-                        input$yvar) %>% 
-          filter(interval == input$selInterval)
-        
-      )
-      
-      
-    }
-    
-    
-    
-    
-  }) # this pulls out the data from the exercise database 
-  output$mytable = isolate(DT::renderDataTable({
+  })
+
+
+  output$mytable = DT::renderDataTable({
     uni_data()
   },
   options = list(filter = "top",
                  scrollX = TRUE, 
-                 scrollY = "200px"))) # this renders the data table from the joined data 1 and 2 
+                 scrollY = "200px")) # this renders the data table from the joined data 1 and 2 
+
   
   
-  output$uniplot1 <- isolate(renderPlot({
+  output$uniplot1 <- renderPlotly({
+
+   join_df(v1 = input$xvar,
+            v2 = input$yvar,
+            delta = input$selInterval,
+            out = "plot") %>% 
+      layout(legend = list(x = 0.1, y = - 0.3, orientation = 'h'))
+
+
     
-    if (is.null(input$split)) {
-      
-      scatter_LS(uni_data(),
-                 input$xvar, input$yvar, out = "plot")
-      
-    } else if (input$split == "Exercise Group") {
-      
-      
-      # scatter_LS(uni_data() %>%
-      #             filter(!is.na(xnat_subjectdata_sub_group) & xnat_subjectdata_sub_group != ""),
-      #             input$xvar, input$yvar, out = "plot") + facet_grid(~xnat_subjectdata_sub_group)
-      
-      (function(x,y) {cowplot::plot_grid(
-        
-        plotlist = (uni_data() %>%
-                      filter(!is.na(xnat_subjectdata_sub_group) & xnat_subjectdata_sub_group != "") %>%
-                      split(.$xnat_subjectdata_sub_group) %>%
-                      map(~scatter_LS(data = ., x = x, y = y, out = "plot", mult = T)))
-        , ncol = 2,
-        labels = names(uni_data() %>%
-                         filter(!is.na(xnat_subjectdata_sub_group) & xnat_subjectdata_sub_group != "") %>%
-                         split(.$xnat_subjectdata_sub_group))
-        
-      )
-      })(input$xvar, input$yvar)
-      
-      
-    }
     
-  }, width = 600, height = 400))
+  })
+  
+  output$results <- renderTable({
+    
+    pp <- join_df(v1 = input$xvar,
+            v2 = input$yvar,
+            delta = input$selInterval,
+            out = "stat")
+    
+    
+  })
+  
+  output$uniplot2 <- renderPlotly({
+    
+    subj_change_plot(varlist = input$choose1, 
+                     subjects = input$selSubj,
+                     del = input$id1011) %>% 
+      layout(legend = list(x = 0.1, y = - 0.3, orientation = 'h'))
+    
+    
+  })
   
   
+  output$uniplot3 <- renderPlotly({
+    
+    subj_grid_plots(varlist = input$choose3, 
+                    subjlist = input$selSubj3)
+    
+  })
   
   # LONGITUDINAL ----------------------  
   
@@ -301,7 +109,7 @@ server <- (function(input, output, session) {
                              
                              (varnames %>% filter(dataset == input$data3))$variable
                
-                             
+                        
                            # } else { NULL }
                          
                          
@@ -311,75 +119,109 @@ server <- (function(input, output, session) {
     
   }) # this updates the variable names for data set 2 
   
-  
+  lsmeans
   # The data
   data <- reactive({
     
     # pulls out relevant data and relabels Subject, Group with appropriate tags
-    cleanData <- (function(data,var) {
+
+    (function(data, input, var){
       
-      df_long <- (function(df){
-        tbl(exercise_database, sql(paste("SELECT * FROM ", df, sep = ""))) %>%
-          filter(!(xnat_subjectdata_sub_group %in% c("not assigned ", "excluded ", "withdrawn"))) %>%
-          filter(!(xnat_subjectdata_subject_label == "1080MM" & Date == "2017-03-30")) %>% 
-          filter(!(xnat_subjectdata_subject_label == "1048JM" & Date == "2017-03-27")) %>%
-          filter(interval <= 6) %>% 
-          collect() })(data)
+      cleanData <- (function(data,var) {
+        
+        df_long <- (function(df){
+          tbl(exercise_database, sql(paste("SELECT * FROM ", df, sep = ""))) %>%
+            filter(!(xnat_subjectdata_sub_group %in% c("not assigned ", "excluded ", "withdrawn"))) %>%
+            filter(!(xnat_subjectdata_subject_label == "1080MM" & Date == "2017-03-30")) %>% 
+            filter(!(xnat_subjectdata_subject_label == "1048JM" & Date == "2017-03-27")) %>%
+            filter(interval <= 6) %>% 
+            collect() })(data)
+        
+        colnames(df_long)[which(colnames(df_long) 
+                                %in% c("xnat_subjectdata_subject_label",
+                                       "xnat_subjectdata_sub_group"))] <- c("Group", "Subject")
+        
+        df_long <- df_long %>%
+          dplyr::select(Subject, Group, var, interval)
+        
+        return(df_long)
+        
+      })(data, var)
       
-      colnames(df_long)[which(colnames(df_long) 
-                              %in% c("xnat_subjectdata_subject_label",
-                                     "xnat_subjectdata_sub_group"))] <- c("Group", "Subject")
-      
-      df_long <- df_long %>%
-        dplyr::select(Subject, Group, var, interval)
-      
-      return(df_long)
-      
-    })(input$data3, input$var)
-    
-    (function(input, var){
       if(input == "none"){
         
         df = cleanData
-        
-      } else if(input == "base"){
-        
-        # in this data set, create a column for baseline removing it from interval
-        
-        df = join(cleanData,
-                  
-                  tidyr::spread(cleanData, interval, var),
-                  by = "Subject",
-                  type = "left",
-                  match = "all"
-                  
-        ) %>%
-          filter(interval!=0) %>%
-          dplyr::select("Subject","interval","Group","0", var)
-        
-        colnames(df)[which(colnames(df)=="0")] <- "baseline"
-        
+         
+        # } else if(input == "base"){
+        # 
+        #   # in this data set, create a column for baseline removing it from interval
+        # 
+        #   df = join(cleanData,
+        # 
+        #             tidyr::spread(cleanData, interval, var),
+        #             by = "Subject",
+        #             type = "left",
+        #             match = "all"
+        # 
+        #   ) %>%
+        #     filter(interval!=0) %>%
+        #     dplyr::select("Subject","interval","Group","0", var)
+        # 
+        #   colnames(df)[which(colnames(df)=="0")] <- "baseline"
+        # 
       } else if(input == "delta"){
         
         df = cleanData %>%
-          group_by(Subject) %>%
-          mutate(change = (get(var) - get(var)[interval == 0])/get(var)[interval == 0]) %>%
-          filter(interval!=0) %>%
-          dplyr::select(Subject, interval, Group, change)
+          left_join(
+            (cleanData %>%
+               group_by(Subject) %>%
+               filter(interval == 0) %>%
+               mutate(base = get(var)) %>%
+               select(-one_of(var, "interval"))),
+            
+            by = c("Subject", "Group")
+            
+          ) %>%
+          group_by(Subject, interval) %>%
+          arrange(Subject, interval) %>%
+          mutate(change = (get(var) - base)/base) %>%
+          select(-one_of(var, "base")) %>%
+          filter(interval != 0)
         
       }
       
       return(df)
       
-    })(input = input$adjust, var = input$var)
-    
+    })(data = input$data3, 
+                                      input = input$adjust, 
+                                      var = input$var)
   }) 
-  
+
   sumData <- reactive({
+    
+    formula <- (function(adjust, var) {
+      
+      if(adjust == "none"){
+        
+        formula <- as.formula(paste(var,"Group * factor(interval)", sep = "~"))
+        
+      } else if(adjust == "base"){  
+        
+        formula <- as.formula(paste(var,"baseline + Group * factor(interval)", sep = "~"))
+        
+      } else if(adjust == "delta"){
+        
+        formula <- as.formula(paste("change","Group * factor(interval)", sep = "~"))
+        
+      }
+      
+      return(formula)
+      
+    })(input$adjust, input$var)
     
     means <- tidy(
       lsmeans::lsmeans( # the sneaky way to deal with the bugs of the lsmeans package
-        lm(lm(formula(), data()), data()), 
+        lm(lm(formula, data()), data()), 
         "interval",
         by = "Group"
       )
@@ -390,8 +232,6 @@ server <- (function(input, output, session) {
       dplyr::summarise(count = n())
     
     means <- plyr::join(means, n, match = "all") 
-    
-    means
     
     
   })
@@ -598,6 +438,23 @@ server <- (function(input, output, session) {
   
   output$contrasts <- renderDataTable({
     
+    # formula <- as.formula(paste(input$var,"Group * factor(interval)", sep = "~"))
+    # 
+    # gee.model <- geeglm(formula,
+    #                     data = data(),
+    #                     
+    #                     corstr="exchangeable", 
+    #                     id = factor(Subject), 
+    #                     std.err = "jack")
+    # 
+    # tidy(
+    #   
+    #   lsmeans::lsmeans(gee.model, 
+    #                    pairwise ~ Group |factor(interval), 
+    #                    adjust = "bonferroni")$contrasts
+    #   
+    # )
+    
     formula <- as.formula(paste(input$var,"Group * factor(interval)", sep = "~"))
     
     gee.model <- geeglm(formula,
@@ -607,19 +464,26 @@ server <- (function(input, output, session) {
                         id = factor(Subject), 
                         std.err = "jack")
     
-    tidy(
+    con_table <- tidy(
       
       lsmeans::lsmeans(gee.model, 
                        pairwise ~ Group |factor(interval), 
                        adjust = "bonferroni")$contrasts
       
-    )%>% 
-      map_if(.p = is.numeric, round, 3) %>% 
-      as.data.frame() %>% 
-      select(-df, -z.ratio)
+    ) %>% 
+      select(level1, level2, interval, estimate, std.error, p.value) 
+    
+    con_table[,4:6] <- round(con_table[,4:6], 4)
+    
+    con_table
+    
+    
     
   },
-  options = list(pageLength = 3)) # fits multiple comparisons onto model()
+          options = list(pageLength = 3), 
+          rownames = FALSE,
+          filter = 'bottom'
+  ) # fits multiple comparisons onto model()
   
   output$dt_long <- renderDataTable({
     

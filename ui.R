@@ -2,75 +2,11 @@
 # PROJECT:      Exercise and Cognition project
 # PROGRAMMER:   Alan Ho, MMStat
 #=================================================================================================================#
+source('init.R', local=FALSE)
 
-# LIBRARIES --------------------------
-library("shinydashboard")
-library("shinyBS")
-library("tidyverse")
-library("broom")
-library("DT")
-library("nlme")
-library("ggplot2")
-library("plotly")
-library("purrr")
-library("magrittr")
-library("DBI")
-library("RSQLite")
-library("tools")
-library("lsmeans")
-library("geepack")
-library("dbplyr")
-library("dplyr")
-# install.packages("tidyverse",
-#                  repos = c("http://rstudio.org/_packages",
-#                            "http://cran.rstudio.com"))
-
-# DATABASE -----------------------------------------------------
-# Specify the current raw data to be used 
-
-# setup database
-# DBI::dbDisconnect(exercise_database)
-##Load filepaths from config file
 configfile <- file.path(path.expand('~'),'.Rconfig.csv')
 try(config <-read.csv(configfile, sep=',', quote='\"', header=T))
 
-setwd(as.character(config$DATADIR)) # sets the working directory
-exercise_database <- DBI::dbConnect(RSQLite::SQLite(),as.character(config$DB)) # connects to database
-
-# to upload data to database
-lapply(dir()[file_ext(dir()) == "csv"], function(file) {
-  
-  dbWriteTable(exercise_database,
-               name = file_path_sans_ext(file),
-               value = read.csv(file),
-               row.names = F,
-               overwrite = T)
-})
-
-
-# variable names file
-varnames <-  read.csv(as.character(config$VARSFILE),
-                   header = T, 
-                   stringsAsFactors = F)
-
-DBI::dbListTables(exercise_database)
-
-
-# subject names for inputs
-subjects <- tbl(exercise_database, 
-                sql(
-                  "SELECT s.Subject, d.interval, d.xnat_subjectdata_sub_group
-                  FROM opex_subjects as s
-                  LEFT JOIN opex_cantabDMS as d
-                  ON s.Subject = d.xnat_subjectdata_subject_label 
-                  GROUP BY Subject
-                  ")) %>% 
-  collect() %>% 
-  filter(!is.na(Subject))
-
-
-# STUFF ----------------------------------------------------------------------
-Logged = FALSE
 
 # USER INTERFACE -------------------------------------------------------------------------------------------------
   # header ---------------
@@ -93,11 +29,8 @@ Logged = FALSE
 
   # body ------------------        
   body <-  dashboardBody(
-    
-    verbatimTextOutput("dataInfo"),
-    
     tabItems(
- 
+      
     # UNIVARIATE ------------------------------------------------------------------    
     tabItem(tabName = "uni",   
             
@@ -105,12 +38,37 @@ Logged = FALSE
                    side = "left", height = "700px",
                    selected = "Regression",
                    tabPanel("Regression",
-                            column(1),
-                            column(4,  plotOutput("uniplot1",
-                                                  height = "330px",
-                                                  width = "450px",
-                                                  click = T)),
-                            column(2)
+                  
+            fluidRow(
+              
+              column(6, plotlyOutput("uniplot1", width = 330)),
+              column(2, tableOutput('results'))
+              
+            ),
+            
+            fluidRow(
+              
+              column(6, selectizeInput("xvar", label = "Predictor",
+                                       choices = varnames$variable, 
+                                       multiple = T,
+                                       options = list(maxItems = 10, placeholder = 'Select Predictor'),
+                                       selected = "bmi_dexa")
+              ),
+              
+              column(6, selectizeInput("yvar", label = "Response",
+                                       choices = varnames$variable, 
+                                       multiple = T,
+                                       options = list(maxItems = 10, placeholder = 'Select Response'),
+                                       selected = 'paltea8')),
+              
+              column(6, selectizeInput("selInterval", label = "Interval",
+                                       choices = c("0", "6", "delta", "pc"), 
+                                       multiple = T,
+                                       options = list(maxItems = 1, placeholder = 'Select Interval'),
+                                       selected = 0))
+            )
+                   
+
                             
                    ),
                    
@@ -123,9 +81,7 @@ Logged = FALSE
                    
                    tabPanel("Diagnostics",
                             
-                            tableOutput('results')
-                            
-                            
+                            "hello"
                             # plotlyOutput("plotres",
                             #              height = "330px",
                             #              width = "450px")
@@ -135,49 +91,79 @@ Logged = FALSE
             ),
             
             
-            box(title = "", height = "700px",
-                
-                column(6, selectizeInput("data1", label = "Dataset 1",
-                                         choices = DBI::dbListTables(exercise_database), 
-                                         multiple = F,
-                                         options = list(maxItems = 2, placeholder = 'Select Dataset'),
-                                         selected = NULL)
-                ),
-                
-                column(6, selectizeInput("xvar", label = "Predictor",
-                                         choices = NULL, 
-                                         multiple = T,
-                                         options = list(maxItems = 10, placeholder = 'Select Predictor'),
-                                         selected = "MMSE")
-                ),
-                
-                column(6, selectizeInput("data2", label = "Dataset 2",
-                                         choices = DBI::dbListTables(exercise_database),
-                                         multiple = T,
-                                         options = list(maxItems = 2, placeholder = 'Select Dataset'),
-                                         selected = "opex_health")
-                ),
-                
-                column(6, selectizeInput("yvar", label = "Response",
-                                         choices = NULL, 
-                                         multiple = T,
-                                         options = list(maxItems = 10, placeholder = 'Select Response'),
-                                         selected = 'r_bps')),
-                
-                column(6, selectizeInput("selInterval", label = "Interval",
-                                         choices = c(0:6), 
-                                         multiple = T,
-                                         options = list(maxItems = 1, placeholder = 'Select Interval'),
-                                         selected = 0)),
-                
-                column(6, selectizeInput("split", label = "Group by",
-                                         choices = c("Exercise Group", "Age", "Gender"), 
-                                         multiple = T,
-                                         options = list(maxItems = 1, placeholder = 'Split by'),
-                                         selected = NULL)),
-                
-                
-                column(6, actionButton("go", "Go"))
+tabBox(title = "", height = "700px", side = "left",
+                   
+tabPanel("Delta Change",
+  
+  fluidRow(
+    
+    column(6, plotlyOutput("uniplot2", width = 550), offset = 1)
+    
+  ),                
+
+  fluidRow(
+    
+    column(6, selectizeInput("choose1", label = "Choose variables",
+                             choices = varnames$variable, 
+                             multiple = T,
+                             options = list(maxItems = 10, placeholder = 'Select Predictor'),
+                             selected = c("bmi_dexa", "bmc"))),
+           
+    column(6, selectizeInput("selSubj", label = "Select Subject",
+                                    choices = list(
+                                      ALL = list("ALL"),
+                                      AIT = c((subjects %>% filter(xnat_subjectdata_sub_group == "AIT"))$Subject),
+                                      MIT = c((subjects %>% filter(xnat_subjectdata_sub_group == "MIT"))$Subject),
+                                      LIT = c((subjects %>% filter(xnat_subjectdata_sub_group == "LIT"))$Subject),
+                                      withdrawn = c((subjects %>% filter(xnat_subjectdata_sub_group == "withdrawn"))$Subject)
+                                    ),
+                                    multiple = T,
+                                    options = list(maxItems = 30, placeholder = 'Select Subject'),
+                                    selected = NULL)),
+    column(4, radioButtons(inputId = "id1011",
+                   label = "Delta",
+                   choices = c("Raw" = "delta", "% Change" = "pc"), 
+                   selected = "pc"))
+           
+    
+    
+                                           
+  
+      )
+), # end of tab panel 
+  
+tabPanel("Subject Trajectories",
+         
+         fluidRow(
+           
+           plotlyOutput("uniplot3")
+           
+           ),
+         
+         
+         fluidRow(
+           column(6, selectizeInput("choose3", label = "Choose variables",
+                                    choices = varnames$variable, 
+                                    multiple = T,
+                                    options = list(maxItems = 10, placeholder = 'Select Predictor'),
+                                    selected = "bmi_dexa")),
+           
+           column(6, selectizeInput("selSubj3", label = "Select Subject",
+                                    choices = list(
+                                      AIT = c((subjects %>% filter(xnat_subjectdata_sub_group == "AIT"))$Subject),
+                                      MIT = c((subjects %>% filter(xnat_subjectdata_sub_group == "MIT"))$Subject),
+                                      LIT = c((subjects %>% filter(xnat_subjectdata_sub_group == "LIT"))$Subject),
+                                      withdrawn = c((subjects %>% filter(xnat_subjectdata_sub_group == "withdrawn"))$Subject)
+                                    ),
+                                    multiple = T,
+                                    options = list(maxItems = 30, placeholder = 'Select Subject'),
+                                    selected = "1001DS"))
+         )
+         
+         
+         
+         )                
+        
                 
             )
             
@@ -209,7 +195,7 @@ Logged = FALSE
                                                      choices = NULL,
                                                      multiple = F,
                                                      options = list(maxItems = 1, placeholder = 'Select Variable'),
-                                                     selected = varnames[2])
+                                                     selected = c(varnames[2]))
                             ),
                             
                             
